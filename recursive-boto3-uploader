@@ -1,0 +1,99 @@
+import os
+import botocore.exceptions
+import boto3
+
+def is_valid_file(path):
+  if os.path.splitext(path)[1].lower() not in (".txt", ".csv", ".pdf", ".rsls", ""):
+    return False
+  return True
+
+def upload_file(s3_client, bucket_name, local_file, s3_key, max_retries=2):
+  """
+  Uploads a file to S3 with retry logic.
+
+  Args:
+    s3_client: A boto3 S3 client object.
+    bucket_name: The name of the S3 bucket.
+    local_file: The path to the local file.
+    s3_key: The S3 key for the uploaded file.
+    max_retries: The maximum number of retries for upload attempts.
+
+  Returns:
+    True on successful upload, False otherwise.
+  """
+  for attempt in range(max_retries + 1):
+    try:
+      s3_client.upload_file(
+        local_file, 
+        bucket_name, 
+        s3_key, 
+        ExtraArgs={'Metadata': {'uploadedBy': 'boto3'}, 'StorageClass': 'INTELLIGENT_TIERING'})
+      return True
+    except botocore.exceptions.ClientError as e:
+      if attempt == max_retries:
+        print(f"Error uploading {local_file} to S3 after {max_retries+1} attempts: {e}")
+        return False
+      else:
+        print(f"Attempt {attempt+1}/{max_retries+1}: Error uploading {local_file} to S3. Retrying...")
+
+
+def upload_directory(s3_client, bucket_name, local_dir, s3_prefix=""):
+  """
+  Uploads a directory and its subdirectories recursively to S3, preserving directory structure and handling whitelist.
+
+  Args:
+    s3_client: A boto3 S3 client object.
+    bucket_name: The name of the S3 bucket.
+    local_dir: The path to the local directory.
+    s3_prefix: An optional prefix for S3 object keys.
+
+  Returns:
+    None
+  """
+  log_directory = os.path.join(os.path.expanduser(local_dir), os.pardir)
+  if not os.path.exists(log_directory):
+    raise ValueError
+  log_file = os.path.join(log_directory, "upload_log.txt")
+  with open(log_file, "a") as f:
+    f.write("Beginning run:\n")
+
+    local_dirname = os.path.basename(os.path.expanduser(local_dir))
+    s3_path = os.path.join(s3_prefix, local_dirname)
+    f.write(f"Output base path: {s3_path}\n")
+
+    expanded_dir = os.path.expanduser(local_dir)
+    relative_path_start = str.index(expanded_dir,local_dirname)
+    for root, dirs, files in os.walk(expanded_dir):
+      for file in files:
+        # whitelist
+        if not is_valid_file(file):
+          continue
+
+        local_path = os.path.join(root, file)
+        # Construct S3 key with directory structure
+        s3_path = os.path.join(root[relative_path_start:], file)
+        # Check if file already exists
+        try:
+          s3_client.head_object(Bucket=bucket_name, Key=s3_path)
+          f.write(f"{local_path} already exists as {s3_path} in S3, skipping upload.\n")
+        except botocore.exceptions.ClientError as e:
+          if e.response['Error']['Code'] == "404":
+            success = upload_file(s3_client, bucket_name, local_path, s3_path)
+            if success:
+              f.write(f"Successfully uploaded {local_path} to S3.\n")
+            else:
+              f.write(f"Failed to upload {local_path} to S3.\n")
+          else:
+            f.write(f"Error checking existence of {local_path} in S3: {e}\n")
+
+
+if __name__ == "__main__":
+  # Configure AWS credentials (e.g., environment variables, boto3 config)
+  s3_client = boto3.client("s3")
+  bucket_name = "bucket name"
+  local_dir = "path"
+  s3_prefix = ""
+
+  upload_directory(s3_client, bucket_name, local_dir, s3_prefix)
+
+  print(f"Upload completed. Log details written to {os.path.join(local_dir, 'upload_log.txt')}")
