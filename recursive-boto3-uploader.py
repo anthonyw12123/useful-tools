@@ -74,30 +74,35 @@ def upload_directory(s3_client, bucket_name, local_dir, s3_prefix=""):
     with open(log_file_path, "r") as log_file:
       processed_files = {line.strip() for line in log_file}
 
+  all_files = set()
+  for root, _, files in os.walk(os.path.expanduser(local_dir)):
+     for file in files:
+        all_files.add(os.path.join(root, file))
+  
+  pending_files = all_files.difference(processed_files)
+
   with open(log_file_path, "a") as f:
     print("beginning run")
     s3_path = os.path.join(s3_prefix, local_dirname)
     expanded_dir = os.path.expanduser(local_dir)
     relative_path_start = str.index(expanded_dir,local_dirname)
     
-    for root, _, files in os.walk(expanded_dir):
-        for file in files:
-            validate_time()
-            file_path = os.path.join(root, file)
-            if not is_valid_path(file_path):
-                print(f"skipping path {file_path}")
-                continue
-            if file_path in processed_files:
-                print(f"skipping {file_path}")
-                continue
-            s3_path = s3_path = os.path.join(root[relative_path_start:], file)
-            if os.path.basename(root).startswith("_"):
-                print(f"skipping file {root} - directory is to be skipped")
-                continue
-            print(f"uploading {file_path}...", end="")
-            upload_file(s3_client, bucket_name, file_path, s3_path, f)
-            print("successfully")
-            f.flush()
+    for file_path in pending_files:
+      validate_time()
+      if not is_valid_path(file_path):
+          print(f"skipping path {file_path}")
+          continue
+      if file_path in processed_files:
+          print(f"skipping {file_path}")
+          continue
+      s3_path = s3_path = os.path.join(root[relative_path_start:], file)
+      if os.path.basename(root).startswith("_"):
+          print(f"skipping file {root} - directory is to be skipped")
+          continue
+      print(f"uploading {file_path}...", end="")
+      upload_file(s3_client, bucket_name, file_path, s3_path, f)
+      print("successfully")
+      f.flush()
 
 if __name__ == "__main__":
   # Configure AWS credentials (e.g., environment variables, boto3 config)
