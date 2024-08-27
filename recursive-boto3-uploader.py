@@ -5,6 +5,7 @@ import numpy as np
 import time
 import sys
 from pathlib import Path
+import re
 
 def validate_time():
   current_time = time.localtime()
@@ -15,7 +16,7 @@ def validate_time():
     sys.exit()
 
 def passes_whitelist(path):
-  if os.path.splitext(path)[1].lower() not in (".arw", ".jpg", ".rw2", ".mp4", ".dng"): #png omitted
+  if os.path.splitext(path)[1].lower() not in (".arw", ".jpg", ".rw2", ".mp4", ".dng", ".heic"): #png, mov omitted
     return False
   return True
 
@@ -36,7 +37,7 @@ def is_valid_path(file):
 def is_valid_s3_path(s3_client, local_file, s3_key, log):
   try:
     s3_client.head_object(Bucket=bucket_name, Key=s3_key)
-    print(f"{local_file} already exists as {s3_key} in S3, skipping upload.\n")
+    print(f"{local_file} already exists in S3, skipping upload.\n")
     log.write(f"{local_file}\n")
     return False
   except botocore.exceptions.ClientError as e:
@@ -79,12 +80,12 @@ def upload_directory(s3_client, bucket_name, local_dir, s3_prefix=""):
     expanded_dir = os.path.expanduser(local_dir)
     relative_path_start = str.index(expanded_dir,local_dirname)
     
-    for root, _, files in os.walk(local_dir):
+    for root, _, files in os.walk(expanded_dir):
         for file in files:
             validate_time()
             file_path = os.path.join(root, file)
             if not is_valid_path(file_path):
-                print(f"skipping path {file_path} - invalid")
+                print(f"skipping path {file_path}")
                 continue
             if file_path in processed_files:
                 print(f"skipping {file_path}")
@@ -102,9 +103,17 @@ if __name__ == "__main__":
   # Configure AWS credentials (e.g., environment variables, boto3 config)
   s3_client = boto3.client("s3")
   bucket_name = "woody-photo-archive"
-  local_dir = "/Volumes/MASS STORAGE/2023"
   s3_prefix = ""
+  base_directory = os.path.expanduser("/Volumes/Lightroom")
 
-  upload_directory(s3_client, bucket_name, local_dir, s3_prefix)
+  folders = sorted(filter(lambda x: os.path.isdir(os.path.join(base_directory, x)) and re.match(r"^\d{4}$", x),
+                        os.listdir(base_directory) ) , reverse=True)
 
-  print(f"Upload completed. Log details written to {os.path.join(local_dir, 'upload_log.txt')}")
+  for item in folders:
+        year_folder_path = os.path.join(base_directory, item)
+        try:
+            print(f"Processing year folder: {year_folder_path}")
+            upload_directory(s3_client, bucket_name, year_folder_path, s3_prefix)
+        except Exception as e:
+            print(f"Error processing year folder {year_folder_path}: {e}")
+  print(f"Upload completed.")
