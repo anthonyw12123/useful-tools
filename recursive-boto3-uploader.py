@@ -87,8 +87,8 @@ def upload_directory(s3_client, bucket_name, local_dir, s3_prefix=""):
     expanded_dir = os.path.expanduser(local_dir)
     relative_path_start = str.index(expanded_dir,local_dirname)
     
-    for file_path in pending_files:
-      validate_time()
+    for file_path in sorted(pending_files, reverse=True):
+      #validate_time()
       if not is_valid_path(file_path):
           print(f"skipping path {file_path}")
           continue
@@ -104,21 +104,63 @@ def upload_directory(s3_client, bucket_name, local_dir, s3_prefix=""):
       print("successfully")
       f.flush()
 
+def download_directory():
+  import boto3
+
+def download_files(bucket_name, prefix, local_path):
+  """
+  Downloads all files from an S3 bucket with the given prefix to the local path.
+
+  Args:
+    bucket_name: The name of the S3 bucket.
+    prefix: The prefix of the files to download.
+    local_path: The local path to download the files to.
+  """
+
+  s3 = boto3.client('s3')
+  paginator = s3.get_paginator('list_objects_v2')
+  pages = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
+
+  for page in pages:
+    for obj in page['Contents']:
+      s3_object = obj['Key']
+      # Construct the local file path by joining the local_path with the
+      # relative path of the object key from the prefix.
+      # This ensures correct directory structure is maintained locally.
+      relative_path = s3_object[len(prefix):]
+      local_file_path = os.path.join(local_path, relative_path)
+
+      # Create any necessary directories locally
+      local_file_dir = os.path.dirname(local_file_path)
+      os.makedirs(local_file_dir, exist_ok=True)
+
+      if os.path.exists(local_file_path):
+        print(f"skipping {local_file_path}")
+        continue
+
+      try:
+        s3.download_file(bucket_name, s3_object, local_file_path)
+        print(f"Downloaded {s3_object} to {local_file_path}")
+      except Exception as e:
+        print(f"Error downloading {s3_object}: {e}")
+
 if __name__ == "__main__":
   # Configure AWS credentials (e.g., environment variables, boto3 config)
-  s3_client = boto3.client("s3")
+  # s3_client = boto3.client("s3")
   bucket_name = "woody-photo-archive"
-  s3_prefix = ""
-  base_directory = os.path.expanduser("/Volumes/Lightroom")
+  download_files(bucket_name, '2024/2024-02-20/', "/Volumes/STORAGE")
 
-  folders = sorted(filter(lambda x: os.path.isdir(os.path.join(base_directory, x)) and re.match(r"^\d{4}$", x),
-                        os.listdir(base_directory) ) , reverse=True)
+  # s3_prefix = ""
+  # base_directory = os.path.expanduser("/Volumes/Lightroom")
 
-  for item in folders:
-        year_folder_path = os.path.join(base_directory, item)
-        try:
-            print(f"Processing year folder: {year_folder_path}")
-            upload_directory(s3_client, bucket_name, year_folder_path, s3_prefix)
-        except Exception as e:
-            print(f"Error processing year folder {year_folder_path}: {e}")
-  print(f"Upload completed.")
+  # folders = sorted(filter(lambda x: os.path.isdir(os.path.join(base_directory, x)) and re.match(r"^\d{4}$", x),
+  #                       os.listdir(base_directory) ) , reverse=True)
+
+  # for item in folders:
+  #       year_folder_path = os.path.join(base_directory, item)
+  #       try:
+  #           print(f"Processing year folder: {year_folder_path}")
+  #           upload_directory(s3_client, bucket_name, year_folder_path, s3_prefix)
+  #       except Exception as e:
+  #           print(f"Error processing year folder {year_folder_path}: {e}")
+  # print(f"Upload completed.")
